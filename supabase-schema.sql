@@ -283,8 +283,8 @@ grant execute on function app_save_settings(uuid, jsonb) to anon;
 -- created — there is no "add admin" button anywhere in the app, and
 -- the trigger above blocks a 6th row even here, permanently.
 --
--- insert into admins (name, pin_hash) values
---   ('Emmanuel Ofosu Yeboah', crypt('1234', gen_salt('bf'))),
+insert into admins (name, pin_hash) values
+('Emmanuel Ofosu Yeboah', crypt('1234', gen_salt('bf')));
 --   ('Admin Two',             crypt('2345', gen_salt('bf'))),
 --   ('Admin Three',           crypt('3456', gen_salt('bf'))),
 --   ('Admin Four',            crypt('4567', gen_salt('bf'))),
