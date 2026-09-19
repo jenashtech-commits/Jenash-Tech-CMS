@@ -419,6 +419,13 @@ select.filter-sel{padding:9px 10px;border-radius:10px;border:1px solid var(--bor
           </select>
           <button class="btn btn-sm" onclick="exportMembersCsv()">⬇ Export CSV</button>
         </div>
+        <div id="memberBulkBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;">
+          <span style="font-size:12.5px;color:var(--danger);font-weight:600;"><span id="memberBulkCount">0</span> member(s) selected</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm" onclick="clearMemberSelection()">Clear</button>
+            <button class="btn btn-sm btn-danger" onclick="confirmBulkDeleteMembers()">🗑 Delete Selected</button>
+          </div>
+        </div>
         <div id="membersTableWrap"></div>
       </section>
 
@@ -1016,6 +1023,7 @@ function memberDeptOptions(selected){
   return state.departments.map(d=>`<option value="${esc(d.name)}" ${d.name===selected?'selected':''}>${esc(d.name)}</option>`).join('')
     || `<option value="">No departments yet</option>`;
 }
+let selectedMemberIds = new Set();
 function renderMembers(){
   const q = (document.getElementById('memberSearch').value||'').toLowerCase();
   const df = document.getElementById('memberDeptFilter').value;
@@ -1026,15 +1034,22 @@ function renderMembers(){
     if(sf && (m.status||'Active')!==sf) return false;
     return true;
   });
+  // Drop selected ids that are no longer visible/exist, then refresh the bulk bar
+  const visibleIds = new Set(list.map(m=>m.id));
+  selectedMemberIds.forEach(id=>{ if(!visibleIds.has(id)) selectedMemberIds.delete(id); });
   const wrap = document.getElementById('membersTableWrap');
   if(!state.members.length){
     wrap.innerHTML = emptyState('members', 'No members yet', 'Add your congregation members to start tracking attendance, giving and communication.', "openMemberModal()", "Add First Member");
+    updateMemberBulkBar();
     return;
   }
+  const allChecked = list.length>0 && list.every(m=>selectedMemberIds.has(m.id));
   wrap.innerHTML = `<div class="table-scroll"><table><thead><tr>
+    <th style="width:34px;"><input type="checkbox" ${allChecked?'checked':''} onchange="toggleAllMembers(this.checked)"></th>
     <th>Name</th><th>Phone</th><th>Department</th><th>Status</th><th>Joined</th><th></th>
   </tr></thead><tbody>${list.map(m=>`
     <tr>
+      <td><input type="checkbox" ${selectedMemberIds.has(m.id)?'checked':''} onchange="toggleMemberSelect('${m.id}', this.checked)"></td>
       <td><div style="display:flex;align-items:center;gap:8px;"><div class="avatar" style="width:26px;height:26px;font-size:10px;">${esc(initials(m.name))}</div>${esc(m.name)}</div></td>
       <td>${esc(m.phone||'—')}</td>
       <td>${esc(m.department||'—')}</td>
@@ -1046,6 +1061,56 @@ function renderMembers(){
       </div></td>
     </tr>`).join('')}</tbody></table></div>
     ${!list.length ? emptyRow('No members match your filters.') : ''}`;
+  updateMemberBulkBar();
+}
+function toggleMemberSelect(id, checked){
+  if(checked) selectedMemberIds.add(id); else selectedMemberIds.delete(id);
+  updateMemberBulkBar();
+}
+function toggleAllMembers(checked){
+  document.querySelectorAll('#membersTableWrap tbody input[type="checkbox"]').forEach(cb=>{
+    const id = cb.getAttribute('onchange').match(/toggleMemberSelect\('([^']+)'/)[1];
+    cb.checked = checked;
+    if(checked) selectedMemberIds.add(id); else selectedMemberIds.delete(id);
+  });
+  updateMemberBulkBar();
+}
+function clearMemberSelection(){
+  selectedMemberIds.clear();
+  renderMembers();
+}
+function updateMemberBulkBar(){
+  const bar = document.getElementById('memberBulkBar');
+  const count = selectedMemberIds.size;
+  document.getElementById('memberBulkCount').textContent = count;
+  bar.style.display = count>0 ? 'flex' : 'none';
+}
+function confirmBulkDeleteMembers(){
+  const count = selectedMemberIds.size;
+  if(!count) return;
+  openModal(`Delete ${count} member${count===1?'':'s'}?`,
+    `<p style="font-size:13.5px;color:var(--text-dim);">This action can't be undone. Are you sure you want to permanently delete <b style="color:var(--text)">${count}</b> selected member${count===1?'':'s'}?</p>`,
+    `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="doBulkDeleteMembers()">Delete ${count}</button>`);
+}
+async function doBulkDeleteMembers(){
+  const ids = Array.from(selectedMemberIds);
+  const total = ids.length;
+  document.getElementById('modalFoot').innerHTML = `<button class="btn btn-danger" disabled>Deleting 0 / ${total}…</button>`;
+  let done = 0, failed = 0;
+  for(const id of ids){
+    const before = state.members.length;
+    await deleteDocRow('members', id);
+    if(state.members.length === before) failed++;
+    done++;
+    const btn = document.querySelector('#modalFoot .btn');
+    if(btn) btn.textContent = `Deleting ${done} / ${total}…`;
+    if(!sessionToken) break; // session expired mid-batch — stop, login screen is already showing
+  }
+  selectedMemberIds.clear();
+  closeModal();
+  const ok = done - failed;
+  toast(failed ? `Deleted ${ok} of ${total} (${failed} failed)` : `${ok} member${ok===1?'':'s'} deleted`, failed ? 'err' : 'ok');
+  renderMembers(); renderDashboard(); renderDepartments(); renderReports();
 }
 function openMemberModal(id){
   editingId = id||null;
